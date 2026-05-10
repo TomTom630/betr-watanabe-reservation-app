@@ -19,6 +19,41 @@ export default function Calendar() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const editFileInputRef = useRef<HTMLInputElement>(null);
+  const [note, setNote] = useState<string>("");
+  const [noteUpdatedAt, setNoteUpdatedAt] = useState<string>("");
+  const [savingNote, setSavingNote] = useState(false);
+  const [noteSaved, setNoteSaved] = useState(false);
+
+  const fetchNote = async () => {
+    try {
+      const r = await fetch("/api/notes");
+      const d = await r.json();
+      setNote(d.content || "");
+      setNoteUpdatedAt(d.updatedAt || "");
+    } catch {}
+  };
+
+  const saveNote = async () => {
+    if (savingNote) return;
+    setSavingNote(true);
+    setNoteSaved(false);
+    try {
+      const res = await fetch("/api/notes", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: note }),
+      });
+      const data = await res.json();
+      if (data.updatedAt) {
+        setNoteUpdatedAt(data.updatedAt);
+        setNoteSaved(true);
+        setTimeout(() => setNoteSaved(false), 2000);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+    setSavingNote(false);
+  };
 
   const fetchEntries = async () => {
     try {
@@ -35,6 +70,7 @@ export default function Calendar() {
 
   useEffect(() => {
     fetchEntries();
+    fetchNote();
   }, []);
 
   const today = new Date();
@@ -132,6 +168,27 @@ export default function Calendar() {
       <div className="text-center text-xs text-gray-500 mt-4 leading-relaxed">
         オレンジ枠＝予約表写真あり｜タップで拡大表示<br />
         {loading ? "読み込み中..." : `${entries.length}件登録`}
+      </div>
+
+      <div className="mt-6 px-1">
+        <div className="text-sm font-semibold mb-2 flex items-center justify-between">
+          <span>📋 申し送り</span>
+          {savingNote && <span className="text-xs text-gray-500 font-normal">保存中...</span>}
+          {noteSaved && <span className="text-xs text-green-600 font-normal">✓ 保存しました</span>}
+        </div>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          onBlur={saveNote}
+          rows={5}
+          placeholder="共有メモ・引き継ぎ事項などをここに入力（フォーカスを外すと自動保存）"
+          className="w-full p-3 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:border-orange-400 resize-y"
+        />
+        {noteUpdatedAt && (
+          <div className="text-xs text-gray-400 mt-1 text-right">
+            最終更新: {new Date(noteUpdatedAt).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+          </div>
+        )}
       </div>
 
       {selectedEntry && (

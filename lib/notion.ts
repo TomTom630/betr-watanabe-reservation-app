@@ -51,6 +51,71 @@ function mapPage(page: any): Entry {
 /**
  * 同じ日付のエントリがあれば写真を上書き、なければ新規作成
  */
+// =================================
+// 申し送り共有メモ（Notionページの本文に保存）
+// =================================
+export const NOTES_PAGE_ID = process.env.NOTION_NOTES_PAGE_ID || "";
+
+export async function getSharedNote(): Promise<{ content: string; updatedAt: string }> {
+  if (!notion || !NOTES_PAGE_ID) return { content: "", updatedAt: "" };
+  try {
+    const page: any = await notion.pages.retrieve({ page_id: NOTES_PAGE_ID });
+    const blocks = await notion.blocks.children.list({ block_id: NOTES_PAGE_ID, page_size: 100 });
+    const lines: string[] = [];
+    for (const b of blocks.results as any[]) {
+      if (b.type === "paragraph") {
+        const text = (b.paragraph?.rich_text || []).map((t: any) => t.plain_text || "").join("");
+        lines.push(text);
+      }
+    }
+    return { content: lines.join("\n"), updatedAt: page.last_edited_time || "" };
+  } catch (err: any) {
+    console.error("getSharedNote error:", err?.body || err?.message || err);
+    return { content: "", updatedAt: "" };
+  }
+}
+
+export async function setSharedNote(content: string): Promise<{ updatedAt: string }> {
+  if (!notion || !NOTES_PAGE_ID) throw new Error("Notes page not configured");
+
+  // 既存の子ブロックを全削除
+  const existing = await notion.blocks.children.list({ block_id: NOTES_PAGE_ID, page_size: 100 });
+  await Promise.all(
+    (existing.results as any[]).map((b) =>
+      notion.blocks.delete({ block_id: b.id }).catch(() => null)
+    )
+  );
+
+  // 行ごとにparagraphブロックを追加（1行2000文字以内に分割）
+  const lines = content.split("\n");
+  const children = lines.map((line) => {
+    const safeLine = line.slice(0, 2000);
+    return {
+      object: "block" as const,
+      type: "paragraph" as const,
+      paragraph: {
+        rich_text: safeLine.length > 0
+          ? [{ type: "text" as const, text: { content: safeLine } }]
+          : [],
+      },
+    };
+  });
+
+  // Notion APIは1リクエスト100ブロックまで
+  const chunks: typeof children[] = [];
+  for (let i = 0; i < children.length; i += 100) {
+    chunks.push(children.slice(i, i + 100));
+  }
+  for (const chunk of chunks) {
+    if (chunk.length > 0) {
+      await notion.blocks.children.append({ block_id: NOTES_PAGE_ID, children: chunk as any });
+    }
+  }
+
+  const updated: any = await notion.pages.retrieve({ page_id: NOTES_PAGE_ID });
+  return { updatedAt: updated.last_edited_time || "" };
+}
+
 export async function upsertEntry(date: string, photoUrl: string, photoName: string): Promise<{ pageId: string; created: boolean }> {
   if (!notion) throw new Error("Notion client not configured");
 
