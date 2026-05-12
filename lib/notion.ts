@@ -116,6 +116,90 @@ export async function setSharedNote(content: string): Promise<{ updatedAt: strin
   return { updatedAt: updated.last_edited_time || "" };
 }
 
+// =================================
+// 申し送りログ（日付付き履歴タイムライン）
+// =================================
+export const NOTES_LOG_DATABASE_ID = process.env.NOTION_NOTES_LOG_DATABASE_ID || "";
+const NOTES_LOG_RETENTION_DAYS = 30;
+
+export type NoteLog = {
+  pageId: string;
+  timestamp: string;
+  content: string;
+};
+
+export async function listNoteLogs(): Promise<NoteLog[]> {
+  if (!notion || !NOTES_LOG_DATABASE_ID) return [];
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - NOTES_LOG_RETENTION_DAYS);
+  try {
+    const res = await notion.databases.query({
+      database_id: NOTES_LOG_DATABASE_ID,
+      filter: {
+        property: "タイムスタンプ",
+        date: { on_or_after: cutoff.toISOString() },
+      },
+      sorts: [{ property: "タイムスタンプ", direction: "descending" }],
+      page_size: 100,
+    });
+    return (res.results as any[]).map((page) => {
+      const props = page.properties || {};
+      const timestamp = props["タイムスタンプ"]?.date?.start || "";
+      const content = (props["内容"]?.rich_text || []).map((t: any) => t.plain_text).join("") || "";
+      return { pageId: page.id, timestamp, content };
+    });
+  } catch (err: any) {
+    console.error("listNoteLogs error:", err?.body || err?.message || err);
+    return [];
+  }
+}
+
+export async function addNoteLog(content: string): Promise<NoteLog> {
+  if (!notion || !NOTES_LOG_DATABASE_ID) throw new Error("Notes log database not configured");
+  const now = new Date().toISOString();
+  const title = `申し送り ${new Date().toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}`;
+  const safeContent = content.slice(0, 2000);
+  const created: any = await notion.pages.create({
+    parent: { database_id: NOTES_LOG_DATABASE_ID },
+    properties: {
+      "名前": { title: [{ text: { content: title } }] },
+      "タイムスタンプ": { date: { start: now } },
+      "内容": { rich_text: [{ text: { content: safeContent } }] },
+    },
+  });
+  return { pageId: created.id, timestamp: now, content: safeContent };
+}
+
+export async function deleteNoteLog(pageId: string): Promise<void> {
+  if (!notion) throw new Error("Notion client not configured");
+  await notion.pages.update({ page_id: pageId, archived: true });
+}
+
+export async function cleanupOldNoteLogs(): Promise<number> {
+  if (!notion || !NOTES_LOG_DATABASE_ID) return 0;
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - NOTES_LOG_RETENTION_DAYS);
+  const cutoffStr = cutoff.toISOString();
+  const res = await notion.databases.query({
+    database_id: NOTES_LOG_DATABASE_ID,
+    filter: {
+      property: "タイムスタンプ",
+      date: { before: cutoffStr },
+    },
+    page_size: 100,
+  });
+  let deleted = 0;
+  for (const page of res.results as any[]) {
+    try {
+      await notion.pages.update({ page_id: page.id, archived: true });
+      deleted++;
+    } catch (e) {
+      console.error("Failed to archive note log:", page.id, e);
+    }
+  }
+  return deleted;
+}
+
 export async function upsertEntry(date: string, photoUrl: string, photoName: string): Promise<{ pageId: string; created: boolean }> {
   if (!notion) throw new Error("Notion client not configured");
 

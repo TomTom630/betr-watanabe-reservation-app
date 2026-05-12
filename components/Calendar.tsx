@@ -23,6 +23,56 @@ export default function Calendar() {
   const [noteUpdatedAt, setNoteUpdatedAt] = useState<string>("");
   const [savingNote, setSavingNote] = useState(false);
   const [noteSaved, setNoteSaved] = useState(false);
+  const [logs, setLogs] = useState<Array<{ pageId: string; timestamp: string; content: string }>>([]);
+  const [newLog, setNewLog] = useState<string>("");
+  const [postingLog, setPostingLog] = useState(false);
+
+  const fetchLogs = async () => {
+    try {
+      const r = await fetch("/api/notes/log");
+      const d = await r.json();
+      setLogs(d.logs || []);
+    } catch {}
+  };
+
+  const postLog = async () => {
+    const content = newLog.trim();
+    if (!content || postingLog) return;
+    setPostingLog(true);
+    try {
+      const res = await fetch("/api/notes/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        alert(`投稿エラー: ${data.error}`);
+      } else {
+        setNewLog("");
+        await fetchLogs();
+      }
+    } catch (err: any) {
+      alert(`投稿エラー: ${err.message}`);
+    }
+    setPostingLog(false);
+  };
+
+  const deleteLog = async (pageId: string) => {
+    if (!confirm("この申し送りを削除しますか？")) return;
+    try {
+      await fetch(`/api/notes/log?id=${encodeURIComponent(pageId)}`, { method: "DELETE" });
+      await fetchLogs();
+    } catch (err: any) {
+      alert(`削除エラー: ${err.message}`);
+    }
+  };
+
+  const formatLogDate = (iso: string) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    return d.toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  };
 
   const fetchNote = async () => {
     try {
@@ -71,6 +121,7 @@ export default function Calendar() {
   useEffect(() => {
     fetchEntries();
     fetchNote();
+    fetchLogs();
   }, []);
 
   const today = new Date();
@@ -187,6 +238,45 @@ export default function Calendar() {
         {noteUpdatedAt && (
           <div className="text-xs text-gray-400 mt-1 text-right">
             最終更新: {new Date(noteUpdatedAt).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-6 px-1">
+        <div className="text-sm font-semibold mb-2">📝 申し送り履歴<span className="text-xs font-normal text-gray-500 ml-2">過去30日分</span></div>
+        <div className="flex gap-2 mb-3">
+          <textarea
+            value={newLog}
+            onChange={(e) => setNewLog(e.target.value)}
+            rows={2}
+            placeholder="新しい申し送りを書いて投稿"
+            className="flex-1 p-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:border-orange-400 resize-y"
+          />
+          <button
+            onClick={postLog}
+            disabled={postingLog || !newLog.trim()}
+            className="px-3 py-2 bg-orange-500 text-white text-sm font-semibold rounded-lg active:bg-orange-600 disabled:opacity-40 self-start"
+          >
+            {postingLog ? "..." : "投稿"}
+          </button>
+        </div>
+        {logs.length === 0 ? (
+          <div className="text-xs text-gray-400 text-center py-4">まだ履歴がありません</div>
+        ) : (
+          <div className="space-y-2">
+            {logs.map((log) => (
+              <div key={log.pageId} className="bg-white border border-gray-200 rounded-lg p-3 text-sm">
+                <div className="text-xs text-gray-500 mb-1 flex justify-between items-center">
+                  <span>📅 {formatLogDate(log.timestamp)}</span>
+                  <button
+                    onClick={() => deleteLog(log.pageId)}
+                    className="text-gray-400 active:text-red-500 text-base"
+                    title="削除"
+                  >🗑️</button>
+                </div>
+                <div className="whitespace-pre-wrap break-words">{log.content}</div>
+              </div>
+            ))}
           </div>
         )}
       </div>

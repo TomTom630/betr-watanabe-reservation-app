@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { notion, DATABASE_ID } from "@/lib/notion";
+import { notion, DATABASE_ID, cleanupOldNoteLogs } from "@/lib/notion";
 import { del } from "@vercel/blob";
 
 export const dynamic = "force-dynamic";
@@ -66,10 +66,14 @@ export async function GET(req: Request) {
     }
   }
 
+  // 申し送りログの30日以上前のエントリも削除
+  const noteLogsDeleted = await cleanupOldNoteLogs();
+
   return NextResponse.json({
     cutoff: cutoffStr,
     pagesDeleted: deleted.length,
     blobsDeleted: blobDeleteCount,
+    noteLogsDeleted,
     items: deleted,
   });
 }
